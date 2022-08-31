@@ -1,4 +1,5 @@
-use crate::memory::Memory;
+use crate::{display::Display, memory::Memory};
+use rand::Rng;
 
 type NNN = u16;
 type NN = u8;
@@ -6,6 +7,7 @@ type N = u8;
 type X = u8;
 type Y = u8;
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 pub enum OpCode {
     NONE,
@@ -64,8 +66,15 @@ pub enum OpCode {
 pub struct CPU {
     registers: [u8; 16],
     i: u16,
+    sound: u8,
+    delay: u8,
+
     pc: u16,
+    sp: u8,
+
     stack: [u16; 12],
+
+    latest_fetch: u16,
 }
 
 impl CPU {
@@ -73,8 +82,14 @@ impl CPU {
         Self {
             registers: [0; 16],
             i: 0,
-            pc: 512,
+            delay: 0,
+            sound: 0,
+
+            pc: Memory::get_offset() as u16,
+            sp: 0,
             stack: [0; 12],
+
+            latest_fetch: 0,
         }
     }
 
@@ -82,9 +97,9 @@ impl CPU {
         let most_sig = mem[self.pc + 0];
         let lest_sig = mem[self.pc + 1];
         // self.log_value(" -- ", (most_sig as u16) << 8 | lest_sig as u16);
-        self.pc += 2;
 
-        (most_sig as u16) << 8 | lest_sig as u16
+        self.latest_fetch = (most_sig as u16) << 8 | lest_sig as u16;
+        self.latest_fetch
     }
 
     pub fn decode(&self, instruction: u16) -> OpCode {
@@ -107,7 +122,7 @@ impl CPU {
             let mut output: u16 = 0;
             output += (buf[0] as u16) << 8;
             output += (buf[1] as u16) << 4;
-            output += (buf[0] as u16) << 0;
+            output += (buf[2] as u16) << 0;
             output
         }
 
@@ -165,7 +180,175 @@ impl CPU {
         }
     }
 
-    pub fn execute(&mut self, mem: &mut Memory) -> Result<(), String> {
+    pub fn execute(
+        &mut self,
+        mem: &mut Memory,
+        display: &mut Display,
+        opcode: &OpCode,
+    ) -> Result<(), String> {
+        let mut inc = true;
+
+        match opcode {
+            OpCode::NONE => {}
+            OpCode::HALT => {}
+            OpCode::ROUTINE(_) => {
+                self.log_last(mem);
+                todo!();
+            }
+            OpCode::CLEAR => display.clear_dispaly(),
+            OpCode::CALL(addr) => {
+                self.stack[self.sp as usize] = self.pc;
+                self.sp += 1;
+                self.pc = *addr;
+                inc = false;
+            }
+            OpCode::RETURN => {
+                self.sp -= 1;
+                self.pc = self.stack[self.sp as usize];
+                inc = true;
+            }
+            OpCode::GOTO(addr) => {
+                self.pc = *addr;
+                inc = false;
+            }
+
+            OpCode::EQ(reg, val) => {
+                if self.registers[*reg as usize] == *val {
+                    self.pc += 2;
+                }
+            }
+            OpCode::NEQ(reg, val) => {
+                if self.registers[*reg as usize] != *val {
+                    self.pc += 2;
+                }
+            }
+            OpCode::EQ_REG(rega, regb) => {
+                if self.registers[*rega as usize] == self.registers[*regb as usize] {
+                    self.pc += 2;
+                }
+            }
+            OpCode::SET_CONST(reg, val) => {
+                self.registers[*reg as usize] = *val;
+            }
+            OpCode::ADD_CONST(reg, val) => {
+                self.registers[*reg as usize] += *val;
+            }
+            OpCode::OR(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*rega as usize] | self.registers[*regb as usize]
+            }
+            OpCode::AND(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*rega as usize] & self.registers[*regb as usize]
+            }
+            OpCode::XOR(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*rega as usize] ^ self.registers[*regb as usize]
+            }
+            OpCode::SET_REG(rega, regb) => {
+                self.registers[*rega as usize] = self.registers[*regb as usize]
+            }
+            OpCode::ADD_REG(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*rega as usize] + self.registers[*regb as usize]
+            }
+            OpCode::SUB_REG(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*rega as usize] - self.registers[*regb as usize]
+            }
+            OpCode::BSHIFT_RGHT(rega, regb) => {
+                self.registers[15] = self.registers[*rega as usize] >> 7;
+                self.registers[*rega as usize] = self.registers[*rega as usize] >> 1
+            }
+            OpCode::BSHIFT_LEFT(rega, regb) => {
+                self.registers[15] = self.registers[*rega as usize] & 0b1;
+                self.registers[*rega as usize] = self.registers[*rega as usize] << 1
+            }
+            OpCode::SUBTRACT(rega, regb) => {
+                self.registers[*rega as usize] =
+                    self.registers[*regb as usize] - self.registers[*rega as usize];
+            }
+            OpCode::NEQ_REG(rega, regb) => {
+                if self.registers[*rega as usize] != self.registers[*regb as usize] {
+                    self.pc += 2;
+                }
+            }
+            OpCode::SETI(addr) => {
+                self.i = *addr;
+            }
+            OpCode::JUMP(addr) => {
+                self.pc = self.registers[0] as u16 + *addr;
+                inc = false;
+            }
+            OpCode::RAND(reg, val) => {
+                let num = rand::thread_rng().gen_range(0..255);
+                self.registers[*reg as usize] = num & *val;
+            }
+            OpCode::DRAW(rega, regb, n) => {
+                let x = self.registers[*rega as usize];
+                let y = self.registers[*regb as usize];
+                for i in 0..*n {
+                    let bits: u8 = mem[self.i + i as u16];
+                    for j in 0..8 {
+                        let bit = (bits >> (8 - j)) & 0b1;
+                        if bit == 1 {
+                            display.draw_suqare(x + j, y + i)
+                        }
+                    }
+                }
+            }
+            OpCode::KEY_P(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::KEY_NP(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::GET_DELAY(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::GET_KEY(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::SET_DELAY(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::SET_SOUND(_) => {
+                self.log_last(mem);
+                //todo!();
+            }
+            OpCode::ADDI(reg) => {
+                self.i += self.registers[*reg as usize] as u16;
+            }
+            OpCode::SPRI(reg) => {
+                let char = self.registers[*reg as usize];
+                self.i = char as u16 * 5 as u16;
+            }
+            OpCode::BCP(reg) => {
+                let decimal = self.registers[*reg as usize];
+                mem[self.i] = decimal / 100;
+                mem[self.i + 1] = (decimal % 100) / 10;
+                mem[self.i + 2] = decimal % 10;
+            }
+            OpCode::DUMP(idx) => {
+                for i in 0..*idx {
+                    mem[self.i + i as u16] = self.registers[i as usize];
+                }
+            }
+            OpCode::LOAD(idx) => {
+                for i in 0..*idx {
+                    self.registers[i as usize] = mem[self.i + i as u16];
+                }
+            }
+        }
+
+        if inc {
+            self.pc += 2
+        };
         Ok(())
     }
 
@@ -178,5 +361,13 @@ impl CPU {
             "{0} {1:#06x} : {2:#06x} {2:#018b} {2:#05}",
             label, self.pc, val
         );
+    }
+
+    pub fn log_last(&mut self, mem: &mut Memory) {
+        self.log_value("LATEST OP", self.latest_fetch);
+    }
+
+    pub fn pc_valid(&self) -> bool {
+        (self.pc as usize) < Memory::get_cap()
     }
 }
