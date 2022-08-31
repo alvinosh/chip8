@@ -8,7 +8,8 @@ type Y = u8;
 
 #[derive(Debug)]
 pub enum OpCode {
-    None,
+    NONE,
+    HALT,
     ROUTINE(u16),
     CLEAR,
     RETURN,
@@ -80,7 +81,9 @@ impl CPU {
     pub fn fetch(&mut self, mem: &mut Memory) -> u16 {
         let most_sig = mem[self.pc + 0];
         let lest_sig = mem[self.pc + 1];
+        // self.log_value(" -- ", (most_sig as u16) << 8 | lest_sig as u16);
         self.pc += 2;
+
         (most_sig as u16) << 8 | lest_sig as u16
     }
 
@@ -122,6 +125,7 @@ impl CPU {
         }
 
         match buf {
+            [0x0, 0x0, 0x0, 0x0] => OpCode::HALT,
             [0x0, 0x0, 0xE, 0x0] => OpCode::CLEAR,
             [0x0, 0x0, 0xE, 0xE] => OpCode::RETURN,
             [0x0, nnn @ ..] => OpCode::ROUTINE(tripple(nnn)),
@@ -157,15 +161,8 @@ impl CPU {
             [0xF, x, 0x3, 0x3] => OpCode::BCP(single(x)),
             [0xF, x, 0x5, 0x5] => OpCode::DUMP(single(x)),
             [0xF, x, 0x6, 0x5] => OpCode::LOAD(single(x)),
-            _ => OpCode::None,
+            _ => OpCode::NONE,
         }
-
-        // print!("VALUE : ");
-
-        // for i in 0..4 {
-        //     print!(" {:#03x} ", buf[i])
-        // }
-        // println!()
     }
 
     pub fn execute(&mut self, mem: &mut Memory) -> Result<(), String> {

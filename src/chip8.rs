@@ -1,4 +1,7 @@
-use crate::{cpu::CPU, memory::Memory};
+use crate::{
+    cpu::{OpCode, CPU},
+    memory::Memory,
+};
 
 pub struct CHIP8 {
     cpu: CPU,
@@ -18,10 +21,10 @@ impl CHIP8 {
         &self.memory
     }
 
-    pub fn execute(&mut self) -> Result<(), String> {
+    pub fn execute(&mut self) -> Result<OpCode, String> {
         let instruction = self.cpu.fetch(&mut self.memory);
-        println!("{:?}", self.cpu.decode(instruction));
-        Ok(())
+        let op_code = self.cpu.decode(instruction);
+        Ok(op_code)
         // self.cpu.execute(&mut self.memory)
     }
 }

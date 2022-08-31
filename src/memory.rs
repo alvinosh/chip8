@@ -16,7 +16,7 @@ impl Memory {
 
     pub fn from_rom(name: &str) -> Self {
         let file_buffer =
-            fs::read(format!("roms/{}.ch8", name)).expect("FAILED : Could Not Read ROM");
+            fs::read(format!("roms/{}.c8", name)).expect("FAILED : Could Not Read ROM");
         let mut buffer: [u8; 4096] = [0; 4096];
 
         for (idx, byte) in file_buffer.into_iter().enumerate() {
@@ -33,7 +33,7 @@ impl Memory {
         let chunks = 4096 / line_size;
         for i in 0..chunks {
             for j in 0..line_size {
-                print!(" {:03} ", self.buffer[i * line_size + j])
+                print!(" {:#06x} ", self.buffer[i * line_size + j])
             }
             println!("");
         }
