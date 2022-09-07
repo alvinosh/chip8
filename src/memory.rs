@@ -1,6 +1,7 @@
 use std::{
     fs::{self},
     ops::{Index, IndexMut},
+    path::Path,
 };
 
 const CAPACITY: usize = 4096;
@@ -11,9 +12,14 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn from_rom(name: &str) -> Self {
-        let file_buffer =
-            fs::read(format!("roms/{}.ch8", name)).expect("FAILED : Could Not Read ROM");
+    pub fn new() -> Self {
+        Self {
+            buffer: [0; CAPACITY],
+        }
+    }
+
+    pub fn from_rom<P: AsRef<Path>>(path: P) -> Self {
+        let file_buffer = fs::read(path).expect("FAILED : Could Not Read ROM");
         let mut buffer: [u8; CAPACITY] = [0; CAPACITY];
 
         // 0
@@ -137,6 +143,7 @@ impl Memory {
         Self { buffer }
     }
 
+    #[allow(dead_code)]
     pub fn dump(&self) {
         let line_size = 16;
         let chunks = CAPACITY / line_size;

@@ -1,4 +1,8 @@
-use crate::{display::Display, memory::Memory};
+use crate::{
+    display::Display,
+    keyboard::{self, KeyBoardEvent, Keyboard},
+    memory::Memory,
+};
 use rand::Rng;
 
 type NNN = u16;
@@ -66,7 +70,9 @@ pub enum OpCode {
 pub struct CPU {
     registers: [u8; 16],
     i: u16,
+    #[allow(dead_code)]
     sound: u8,
+    #[allow(dead_code)]
     delay: u8,
 
     pc: u16,
@@ -75,6 +81,7 @@ pub struct CPU {
     stack: [u16; 12],
 
     latest_fetch: u16,
+    latest_addr: u16,
 }
 
 impl CPU {
@@ -90,6 +97,7 @@ impl CPU {
             stack: [0; 12],
 
             latest_fetch: 0,
+            latest_addr: 0,
         }
     }
 
@@ -99,6 +107,7 @@ impl CPU {
         // self.log_value(" -- ", (most_sig as u16) << 8 | lest_sig as u16);
 
         self.latest_fetch = (most_sig as u16) << 8 | lest_sig as u16;
+        self.latest_addr = self.pc;
         self.latest_fetch
     }
 
@@ -184,6 +193,7 @@ impl CPU {
         &mut self,
         mem: &mut Memory,
         display: &mut Display,
+        keyboard: &mut Keyboard,
         opcode: &OpCode,
     ) -> Result<(), String> {
         let mut inc = true;
@@ -192,7 +202,7 @@ impl CPU {
             OpCode::NONE => {}
             OpCode::HALT => {}
             OpCode::ROUTINE(_) => {
-                self.log_last(mem);
+                self.log_last();
                 todo!();
             }
             OpCode::CLEAR => display.clear_dispaly(),
@@ -214,6 +224,7 @@ impl CPU {
 
             OpCode::EQ(reg, val) => {
                 if self.registers[*reg as usize] == *val {
+                    println!("LOL");
                     self.pc += 2;
                 }
             }
@@ -256,11 +267,11 @@ impl CPU {
                 self.registers[*rega as usize] =
                     self.registers[*rega as usize] - self.registers[*regb as usize]
             }
-            OpCode::BSHIFT_RGHT(rega, regb) => {
+            OpCode::BSHIFT_RGHT(rega, _regb) => {
                 self.registers[15] = self.registers[*rega as usize] >> 7;
                 self.registers[*rega as usize] = self.registers[*rega as usize] >> 1
             }
-            OpCode::BSHIFT_LEFT(rega, regb) => {
+            OpCode::BSHIFT_LEFT(rega, _regb) => {
                 self.registers[15] = self.registers[*rega as usize] & 0b1;
                 self.registers[*rega as usize] = self.registers[*rega as usize] << 1
             }
@@ -289,38 +300,36 @@ impl CPU {
                 let y = self.registers[*regb as usize];
                 for i in 0..*n {
                     let bits: u8 = mem[self.i + i as u16];
+                    // println!("BITS: {:#010b}", bits);
                     for j in 0..8 {
                         let bit = (bits >> (8 - j)) & 0b1;
-                        if bit == 1 {
-                            display.draw_suqare(x + j, y + i)
+                        if display.draw_suqare(x + j, y + i, bit == 1) {
+                            self.registers[15] = 1;
                         }
                     }
                 }
             }
-            OpCode::KEY_P(_) => {
-                self.log_last(mem);
-                //todo!();
+            OpCode::KEY_P(reg) => {
+                if keyboard.is_key_pressed(self.registers[*reg as usize]) {
+                    self.pc += 2;
+                }
             }
-            OpCode::KEY_NP(_) => {
-                self.log_last(mem);
-                //todo!();
+            OpCode::KEY_NP(reg) => {
+                if !keyboard.is_key_pressed(self.registers[*reg as usize]) {
+                    self.pc += 2;
+                }
             }
-            OpCode::GET_DELAY(_) => {
-                self.log_last(mem);
-                //todo!();
+            OpCode::GET_KEY(reg) => loop {
+                if let KeyBoardEvent::KeyPressed(n) = keyboard.wait_key(display) {
+                    self.registers[*reg as usize] = n;
+                    break;
+                }
+            },
+            OpCode::GET_DELAY(reg) => {
+                self.registers[*reg as usize] = self.delay;
             }
-            OpCode::GET_KEY(_) => {
-                self.log_last(mem);
-                //todo!();
-            }
-            OpCode::SET_DELAY(_) => {
-                self.log_last(mem);
-                //todo!();
-            }
-            OpCode::SET_SOUND(_) => {
-                self.log_last(mem);
-                //todo!();
-            }
+            OpCode::SET_DELAY(reg) => self.delay = self.registers[*reg as usize],
+            OpCode::SET_SOUND(reg) => self.sound = self.registers[*reg as usize],
             OpCode::ADDI(reg) => {
                 self.i += self.registers[*reg as usize] as u16;
             }
@@ -352,19 +361,40 @@ impl CPU {
         Ok(())
     }
 
+    pub fn delay_timer(&mut self) {
+        if self.delay > 0 {
+            self.delay -= 1;
+        }
+    }
+
+    pub fn sound_timer(&mut self) {
+        if self.sound > 0 {
+            self.sound -= 1;
+        }
+    }
+
     pub fn log_value<T>(&self, label: &str, value: T)
     where
         T: Into<u16>,
     {
         let val: u16 = value.try_into().unwrap();
         println!(
-            "{0} {1:#06x} : {2:#06x} {2:#018b} {2:#05}",
-            label, self.pc, val
+            "{0} ADDR {1:#06x} : VAL {2:#06x} {2:#018b} {2:#05}",
+            label, self.latest_addr, val
         );
     }
 
-    pub fn log_last(&mut self, mem: &mut Memory) {
-        self.log_value("LATEST OP", self.latest_fetch);
+    pub fn log_addr(&mut self, mem: &mut Memory, addr: u16) {
+        print!("ADDR : {:#06x}", addr);
+        self.log_value("|", mem[addr]);
+    }
+
+    pub fn log_last(&mut self) {
+        let opcode = self.decode(self.latest_fetch);
+        let format = format!("{:?}", opcode);
+        let len = format.len();
+        print!("{} {:<1$} |", format, 20 - len);
+        self.log_value("|", self.latest_fetch);
     }
 
     pub fn pc_valid(&self) -> bool {
